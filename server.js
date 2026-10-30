@@ -4,7 +4,8 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
-import { router as authRouter, auth, requireAdmin } from './auth.js';
+import jwt from 'jsonwebtoken';
+import { router as authRouter, auth, requireAdmin, JWT_SECRET } from './auth.js';
 import walletRouter from './wallet.js';
 import gamesRouter from './games.js';
 import { initSchema, query, execute, get } from './db.js';
@@ -20,7 +21,9 @@ app.use('/api/wallet', walletRouter);
 app.use('/api/games', gamesRouter);
 
 app.get('/api/admin/users', auth, requireAdmin, async (req, res) => {
-  const users = await query('SELECT id, username, role, balance, created_at FROM users ORDER BY id');
+  const users = await query(
+    'SELECT id, username, role, balance, created_at FROM users ORDER BY id'
+  );
   res.json({ users });
 });
 
@@ -44,40 +47,49 @@ app.post('/api/admin/settings', auth, requireAdmin, async (req, res) => {
 // --- WebSocket ---
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/api/ws' });
+const rooms = new Map(); // matchId -> Set<ws>
 
-const matchRooms = new Map(); // matchId -> Set<ws>
+function parseCookie(str) {
+  return Object.fromEntries(
+    (str || '').split(';').map(s => s.trim().split('=')).filter(p => p[0])
+  );
+}
 
 wss.on('connection', (ws, req) => {
+  const cookies = parseCookie(req.headers.cookie);
+  try {
+    ws.user = jwt.verify(cookies.token, JWT_SECRET);
+  } catch {
+    ws.close(4001, 'auth required');
+    return;
+  }
+
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'join') {
-      const matchId = String(msg.matchId);
-      if (!matchRooms.has(matchId)) matchRooms.set(matchId, new Set());
-      matchRooms.get(matchId).add(ws);
-      ws.matchId = matchId;
-      ws.userId = msg.userId;
+      const id = String(msg.matchId);
+      if (!rooms.has(id)) rooms.set(id, new Set());
+      rooms.get(id).add(ws);
+      ws.matchId = id;
     }
 
-    if (msg.type === 'move') {
-      const room = matchRooms.get(ws.matchId);
+    if (msg.type === 'move' && ws.matchId) {
+      const room = rooms.get(ws.matchId);
       if (!room) return;
-      for (const client of room) {
-        if (client !== ws && client.readyState === 1) {
-          client.send(JSON.stringify({ type: 'move', from: ws.userId, payload: msg.payload }));
-        }
-      }
+      const payload = JSON.stringify({ type: 'move', from: ws.user.uid, payload: msg.payload });
+      for (const c of room) if (c !== ws && c.readyState === 1) c.send(payload);
     }
   });
 
   ws.on('close', () => {
-    const room = matchRooms.get(ws.matchId);
-    if (room) { room.delete(ws); if (!room.size) matchRooms.delete(ws.matchId); }
+    const room = rooms.get(ws.matchId);
+    if (room) { room.delete(ws); if (!room.size) rooms.delete(ws.matchId); }
   });
 });
 
-// bootstrap: first user becomes admin
+// --- bootstrap ---
 (async () => {
   await initSchema();
   const admin = await get("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
@@ -86,5 +98,5 @@ wss.on('connection', (ws, req) => {
     if (first) await execute("UPDATE users SET role = 'admin' WHERE id = ?", [first.id]);
   }
   const PORT = process.env.PORT || 3000;
-  server.listen(PORT, () => console.log(`listening ${PORT}`));
+  server.listen(PORT, () => console.log(`listening on ${PORT}`));
 })();
