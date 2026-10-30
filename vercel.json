@@ -7,6 +7,8 @@
     { "src": "public/**", "use": "@vercel/static" }
   ],
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/server.js" }
+    { "source": "/api/(.*)", "destination": "/server.js" },
+    { "source": "/", "destination": "/public/index.html" },
+    { "source": "/(.*)", "destination": "/public/$1" }
   ]
 }
