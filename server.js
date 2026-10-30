@@ -12,14 +12,22 @@ import { initSchema, query, execute, get } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+
 app.use(express.json());
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public')));
 
+// static assets from /public
+app.use(express.static(path.join(__dirname, 'public'), {
+  extensions: ['html'],
+  index: ['index.html'],
+}));
+
+// API routes
 app.use('/api/auth', authRouter);
 app.use('/api/wallet', walletRouter);
 app.use('/api/games', gamesRouter);
 
+// admin routes
 app.get('/api/admin/users', auth, requireAdmin, async (req, res) => {
   const users = await query(
     'SELECT id, username, role, balance, created_at FROM users ORDER BY id'
@@ -44,14 +52,30 @@ app.post('/api/admin/settings', auth, requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+// SPA fallback — anything that isn't /api and isn't a real file goes to index
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) return next();
+  const noExt = !path.extname(req.path);
+  if (noExt) {
+    const candidate = path.join(__dirname, 'public', `${req.path.slice(1)}.html`);
+    return res.sendFile(candidate, (err) => {
+      if (err) res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    });
+  }
+  next();
+});
+
 // --- WebSocket ---
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/api/ws' });
-const rooms = new Map(); // matchId -> Set<ws>
+const rooms = new Map();
 
 function parseCookie(str) {
   return Object.fromEntries(
-    (str || '').split(';').map(s => s.trim().split('=')).filter(p => p[0])
+    (str || '')
+      .split(';')
+      .map(s => s.trim().split('='))
+      .filter(p => p[0])
   );
 }
 
@@ -78,14 +102,21 @@ wss.on('connection', (ws, req) => {
     if (msg.type === 'move' && ws.matchId) {
       const room = rooms.get(ws.matchId);
       if (!room) return;
-      const payload = JSON.stringify({ type: 'move', from: ws.user.uid, payload: msg.payload });
+      const payload = JSON.stringify({
+        type: 'move',
+        from: ws.user.uid,
+        payload: msg.payload,
+      });
       for (const c of room) if (c !== ws && c.readyState === 1) c.send(payload);
     }
   });
 
   ws.on('close', () => {
     const room = rooms.get(ws.matchId);
-    if (room) { room.delete(ws); if (!room.size) rooms.delete(ws.matchId); }
+    if (room) {
+      room.delete(ws);
+      if (!room.size) rooms.delete(ws.matchId);
+    }
   });
 });
 
