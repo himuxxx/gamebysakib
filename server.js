@@ -1,8 +1,6 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import http from 'http';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import jwt from 'jsonwebtoken';
 import { router as authRouter, auth, requireAdmin, JWT_SECRET } from './auth.js';
@@ -10,28 +8,39 @@ import walletRouter from './wallet.js';
 import gamesRouter from './games.js';
 import { initSchema, query, execute, get } from './db.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-
 app.use(express.json());
 app.use(cookieParser());
 
-// static assets from /public
-app.use(express.static(path.join(__dirname, 'public'), {
-  extensions: ['html'],
-  index: ['index.html'],
-}));
+// --- lazy schema init (only runs once per cold start) ---
+let initPromise = null;
+function ensureInit() {
+  if (!initPromise) {
+    initPromise = initSchema().catch((e) => {
+      initPromise = null;
+      throw e;
+    });
+  }
+  return initPromise;
+}
 
-// API routes
+app.use(async (req, res, next) => {
+  try {
+    await ensureInit();
+    next();
+  } catch (e) {
+    console.error('schema init failed:', e.message);
+    res.status(500).json({ error: 'db init failed', detail: e.message });
+  }
+});
+
+// --- routes ---
 app.use('/api/auth', authRouter);
 app.use('/api/wallet', walletRouter);
 app.use('/api/games', gamesRouter);
 
-// admin routes
 app.get('/api/admin/users', auth, requireAdmin, async (req, res) => {
-  const users = await query(
-    'SELECT id, username, role, balance, created_at FROM users ORDER BY id'
-  );
+  const users = await query('SELECT id, username, role, balance, created_at FROM users ORDER BY id');
   res.json({ users });
 });
 
@@ -52,30 +61,43 @@ app.post('/api/admin/settings', auth, requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-// SPA fallback — anything that isn't /api and isn't a real file goes to index
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api/')) return next();
-  const noExt = !path.extname(req.path);
-  if (noExt) {
-    const candidate = path.join(__dirname, 'public', `${req.path.slice(1)}.html`);
-    return res.sendFile(candidate, (err) => {
-      if (err) res.sendFile(path.join(__dirname, 'public', 'index.html'));
-    });
-  }
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    env: {
+      turso_url: !!process.env.TURSO_DATABASE_URL,
+      turso_token: !!process.env.TURSO_AUTH_TOKEN,
+      jwt: !!process.env.JWT_SECRET,
+    },
+  });
+});
+
+// --- global error handler ---
+app.use((err, req, res, next) => {
+  console.error('unhandled:', err);
+  res.status(500).json({ error: 'server error', detail: err.message });
+});
+
+// --- bootstrap admin (lazy, after schema) ---
+async function ensureAdmin() {
+  const admin = await get("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
+  if (admin) return;
+  const first = await get('SELECT id FROM users ORDER BY id LIMIT 1');
+  if (first) await execute("UPDATE users SET role = 'admin' WHERE id = ?", [first.id]);
+}
+app.use(async (req, res, next) => {
+  try { await ensureAdmin(); } catch {}
   next();
 });
 
-// --- WebSocket ---
+// --- WebSocket on same HTTP server ---
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/api/ws' });
 const rooms = new Map();
 
 function parseCookie(str) {
   return Object.fromEntries(
-    (str || '')
-      .split(';')
-      .map(s => s.trim().split('='))
-      .filter(p => p[0])
+    (str || '').split(';').map(s => s.trim().split('=')).filter(p => p[0])
   );
 }
 
@@ -102,32 +124,21 @@ wss.on('connection', (ws, req) => {
     if (msg.type === 'move' && ws.matchId) {
       const room = rooms.get(ws.matchId);
       if (!room) return;
-      const payload = JSON.stringify({
-        type: 'move',
-        from: ws.user.uid,
-        payload: msg.payload,
-      });
+      const payload = JSON.stringify({ type: 'move', from: ws.user.uid, payload: msg.payload });
       for (const c of room) if (c !== ws && c.readyState === 1) c.send(payload);
     }
   });
 
   ws.on('close', () => {
     const room = rooms.get(ws.matchId);
-    if (room) {
-      room.delete(ws);
-      if (!room.size) rooms.delete(ws.matchId);
-    }
+    if (room) { room.delete(ws); if (!room.size) rooms.delete(ws.matchId); }
   });
 });
 
-// --- bootstrap ---
-(async () => {
-  await initSchema();
-  const admin = await get("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
-  if (!admin) {
-    const first = await get('SELECT id FROM users ORDER BY id LIMIT 1');
-    if (first) await execute("UPDATE users SET role = 'admin' WHERE id = ?", [first.id]);
-  }
-  const PORT = process.env.PORT || 3000;
+// --- listen only when NOT on Vercel (Vercel wraps the handler itself) ---
+const PORT = process.env.PORT || 3000;
+if (!process.env.VERCEL) {
   server.listen(PORT, () => console.log(`listening on ${PORT}`));
-})();
+}
+
+export default app;
