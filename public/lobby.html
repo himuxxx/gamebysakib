@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Lobby — Nexus</title>
+<link rel="stylesheet" href="/css/style.css"></head>
+<body>
+<div class="container wide">
+  <div class="topbar">
+    <div><strong id="uname">…</strong> · <span class="balance" id="bal">0</span></div>
+    <div class="row" style="flex:0">
+      <button id="adminBtn" style="display:none;width:auto;margin:0;padding:8px 16px">Admin</button>
+      <button id="logout" style="width:auto;margin:0;padding:8px 16px">Logout</button>
+    </div>
+  </div>
+  <div class="card">
+    <h1>Choose your <span>game</span></h1>
+    <p class="sub">pick a game and a stake. first to join pays the same stake. winner takes the pot minus 25% rake.</p>
+    <div class="row" style="max-width:320px">
+      <div><label>Stake (coins)</label><input id="stake" type="number" value="10" min="10"></div>
+    </div>
+    <div class="games-grid">
+      <div class="game-card" data-game="ludo"><h3>Ludo</h3><p>4-player classic · 3D board</p></div>
+      <div class="game-card" data-game="daba"><h3>Daba</h3><p>Bengali strategy board</p></div>
+      <div class="game-card" data-game="16guti"><h3>16 Guti</h3><p>16 pieces · classic</p></div>
+    </div>
+  </div>
+</div>
+<script src="/js/api.js"></script>
+<script src="/js/lobby.js"></script>
+</body></html>
