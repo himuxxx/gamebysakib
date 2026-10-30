@@ -2,7 +2,6 @@ import * as THREE from 'three';
 
 const params = new URLSearchParams(location.search);
 const matchId = params.get('match');
-const gameName = params.get('game') || 'ludo';
 
 const PLAYER_COLORS = { red: 0xe74c3c, green: 0x2ecc71, yellow: 0xf1c40f, blue: 0x3498db };
 const PLAYERS = ['red', 'green', 'yellow', 'blue'];
@@ -39,8 +38,7 @@ const HOME_COL = {
 };
 
 const SIZE = 15;
-const toWorld = (r, c) =>
-  new THREE.Vector3((c - SIZE / 2 + 0.5), 0, (r - SIZE / 2 + 0.5));
+const toWorld = (r, c) => new THREE.Vector3((c - SIZE / 2 + 0.5), 0, (r - SIZE / 2 + 0.5));
 
 const getPlayerForPos = (player, pos) => {
   if (pos < 0) return null;
@@ -57,35 +55,50 @@ const isSafe = (player, pos) => {
 const state = {
   me: null, match: null,
   tokens: { red: [-1,-1,-1,-1], green: [-1,-1,-1,-1], yellow: [-1,-1,-1,-1], blue: [-1,-1,-1,-1] },
-  currentPlayer: 'red',
   dice: null,
   myColor: 'red',
   finished: false,
-  awaitingRoll: true,
 };
 
 // --- three.js setup ---
 const canvas = document.getElementById('game-canvas');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+const wrap = document.getElementById('board-wrap');
+
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+} catch (e) {
+  document.getElementById('board-error').style.display = 'flex';
+  document.getElementById('board-error').textContent = 'WebGL not available: ' + e.message;
+  throw e;
+}
+
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setSize(canvas.clientWidth, canvas.clientWidth);
+renderer.setClearColor(0x0a0d18, 1);
 renderer.shadowMap.enabled = true;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0d18);
-const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-camera.position.set(0, 18, 14);
-camera.lookAt(0, 0, 0);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-dir.position.set(8, 20, 10);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
+
+// --- lights ---
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+dir.position.set(10, 25, 10);
 dir.castShadow = true;
+dir.shadow.mapSize.width = 1024;
+dir.shadow.mapSize.height = 1024;
 scene.add(dir);
 
+const rim = new THREE.PointLight(0x6ea8ff, 0.8, 60);
+rim.position.set(-10, 12, -10);
+scene.add(rim);
+
+// --- board ---
 const board = new THREE.Mesh(
   new THREE.BoxGeometry(15, 0.4, 15),
-  new THREE.MeshStandardMaterial({ color: 0x1a1f35, roughness: 0.7 })
+  new THREE.MeshStandardMaterial({ color: 0x1a1f35, roughness: 0.7, metalness: 0.1 })
 );
 board.position.y = -0.2;
 board.receiveShadow = true;
@@ -110,11 +123,11 @@ MAIN_TRACK.forEach(([r, c], i) => {
 Object.entries(HOME_COL).forEach(([player, cells]) => {
   cells.forEach(([r, c]) => {
     const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.9, 0.1, 0.9),
+      new THREE.BoxGeometry(0.9, 0.12, 0.9),
       new THREE.MeshStandardMaterial({
         color: PLAYER_COLORS[player],
         emissive: PLAYER_COLORS[player],
-        emissiveIntensity: 0.2,
+        emissiveIntensity: 0.25,
         roughness: 0.5,
       })
     );
@@ -138,15 +151,16 @@ Object.entries(BASE_POS).forEach(([player, cells]) => {
   scene.add(mesh);
 });
 
+// --- tokens ---
 const tokenMeshes = {};
 PLAYERS.forEach(p => {
   tokenMeshes[p] = [];
   for (let i = 0; i < 4; i++) {
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.32, 24, 16),
+      new THREE.SphereGeometry(0.35, 24, 16),
       new THREE.MeshStandardMaterial({
-        color: PLAYER_COLORS[p], roughness: 0.25, metalness: 0.3,
-        emissive: PLAYER_COLORS[p], emissiveIntensity: 0.15,
+        color: PLAYER_COLORS[p], roughness: 0.25, metalness: 0.4,
+        emissive: PLAYER_COLORS[p], emissiveIntensity: 0.25,
       })
     );
     mesh.castShadow = true;
@@ -170,28 +184,46 @@ function renderTokens() {
   });
 }
 
-function resize() {
-  const w = canvas.clientWidth;
-  renderer.setSize(w, w);
-  camera.aspect = 1;
+// --- camera + resize, fixed ---
+function applyCamera(w, h) {
+  const aspect = w / h;
+  camera.aspect = aspect;
+
+  // Angled 3D view. Pull back further on narrow screens so board fits.
+  const dist = 22 / Math.min(aspect, 1.2);
+  camera.position.set(0, dist * 0.75, dist * 0.65);
+  camera.lookAt(0, 0, 0);
   camera.updateProjectionMatrix();
 }
-new ResizeObserver(resize).observe(canvas);
-resize();
 
-(function animate() {
+function resize() {
+  // force a non-zero fallback if parent hasn't laid out yet
+  const w = wrap.clientWidth || 600;
+  const h = wrap.clientHeight || 600;
+  renderer.setSize(w, h, false);
+  applyCamera(w, h);
+}
+
+// run twice: immediately + after layout
+resize();
+requestAnimationFrame(resize);
+new ResizeObserver(resize).observe(wrap);
+window.addEventListener('resize', resize);
+
+// --- render loop ---
+function animate() {
   requestAnimationFrame(animate);
   renderer.render(scene, camera);
-})();
+}
+animate();
 
 // --- networking ---
 const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/ws';
 let socket = null;
-let reconnectTimer = null;
 let backoff = 1000;
 
 function connect() {
-  socket = new WebSocket(WS_URL);
+  try { socket = new WebSocket(WS_URL); } catch { return; }
 
   socket.onopen = () => {
     backoff = 1000;
@@ -204,7 +236,7 @@ function connect() {
   socket.onmessage = (ev) => {
     let msg;
     try { msg = JSON.parse(ev.data); } catch { return; }
-    if (msg.type === 'move' && msg.from !== state.me.id) {
+    if (msg.type === 'move' && msg.from !== state.me?.id) {
       applyMove(msg.payload.player, msg.payload.idx, msg.payload.newPos);
       renderTokens();
     }
@@ -212,11 +244,11 @@ function connect() {
 
   socket.onclose = () => {
     document.getElementById('opp').textContent = 'reconnecting…';
-    reconnectTimer = setTimeout(connect, backoff);
+    setTimeout(connect, backoff);
     backoff = Math.min(backoff * 2, 15000);
   };
 
-  socket.onerror = () => socket.close();
+  socket.onerror = () => { try { socket.close(); } catch {} };
 }
 
 function sendMove(player, idx, newPos) {
@@ -262,7 +294,7 @@ async function finishMatch(winnerColor) {
   } catch {}
 }
 
-// --- token click picking ---
+// --- picking ---
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 
@@ -291,7 +323,7 @@ canvas.addEventListener('click', (ev) => {
   document.getElementById('roll').disabled = false;
 });
 
-// --- roll button ---
+// --- roll ---
 document.getElementById('roll').onclick = () => {
   if (state.finished || state.dice !== null) return;
   const d = 1 + Math.floor(Math.random() * 6);
@@ -302,11 +334,7 @@ document.getElementById('roll').onclick = () => {
     .map((pos, i) => canMove(state.myColor, pos, d) ? i : -1)
     .filter(i => i >= 0);
 
-  if (!movable.length) {
-    state.dice = null;
-    document.getElementById('roll').disabled = false;
-    return;
-  }
+  if (!movable.length) { state.dice = null; return; }
   if (movable.length === 1) {
     const idx = movable[0];
     const pos = state.tokens[state.myColor][idx];
@@ -316,7 +344,6 @@ document.getElementById('roll').onclick = () => {
     sendMove(state.myColor, idx, newPos);
     state.dice = null;
     document.getElementById('dice').textContent = '?';
-    document.getElementById('roll').disabled = false;
   }
 };
 
