@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Admin — Nexus</title>
+<link rel="stylesheet" href="/css/style.css"></head>
+<body>
+<div class="container wide">
+  <div class="topbar">
+    <div><strong>Admin Panel</strong></div>
+    <button id="back" style="width:auto;margin:0;padding:8px 16px">← Lobby</button>
+  </div>
+  <div class="card">
+    <h1>Users</h1>
+    <table id="users"></table>
+  </div>
+  <div class="card" style="margin-top:20px">
+    <h1>Recent Matches</h1>
+    <table id="matches"></table>
+  </div>
+  <div class="card" style="margin-top:20px">
+    <h1>Settings</h1>
+    <div class="row" style="max-width:720px">
+      <div><label>Commission %</label><input id="s_commission" type="number"></div>
+      <div><label>Min Stake</label><input id="s_min" type="number"></div>
+      <div><label>Max Stake</label><input id="s_max" type="number"></div>
+      <div><label>Starting Balance</label><input id="s_start" type="number"></div>
+    </div>
+    <button id="saveSettings" style="max-width:200px">Save</button>
+    <p class="error" id="err"></p>
+  </div>
+</div>
+<script src="/js/api.js"></script>
+<script src="/js/admin.js"></script>
+</body></html>
