@@ -1,13 +1,47 @@
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Game — Nexus</title>
-<link rel="stylesheet" href="/css/style.css"></head>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  #board-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 900px;
+    aspect-ratio: 1 / 1;
+    margin: 0 auto;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #0a0d18;
+  }
+  #game-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 16px;
+  }
+  #board-error {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    color: #ff6b81;
+    font-size: 14px;
+    padding: 24px;
+    text-align: center;
+    background: rgba(10,13,24,0.9);
+  }
+</style>
+</head>
 <body>
 <div class="container wide">
   <div class="topbar">
     <div><span class="balance" id="bal">0</span> · <span id="opp">connecting…</span></div>
     <button id="back" style="width:auto;margin:0;padding:8px 16px">← Lobby</button>
   </div>
-  <canvas id="game-canvas"></canvas>
+  <div id="board-wrap">
+    <canvas id="game-canvas"></canvas>
+    <div id="board-error"></div>
+  </div>
   <div class="dice-panel">
     <div class="dice" id="dice">?</div>
     <button id="roll" style="width:auto;padding:12px 32px;margin:0">Roll Dice</button>
@@ -15,6 +49,18 @@
 </div>
 <script type="importmap">
 { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+  window.addEventListener('error', (e) => {
+    const box = document.getElementById('board-error');
+    box.style.display = 'flex';
+    box.textContent = 'Load error: ' + (e.message || e.error || 'unknown');
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    const box = document.getElementById('board-error');
+    box.style.display = 'flex';
+    box.textContent = 'Module error: ' + (e.reason?.message || e.reason || 'unknown');
+  });
 </script>
 <script type="module" src="/js/ludo.js"></script>
 </body></html>
