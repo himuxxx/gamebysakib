@@ -6,18 +6,17 @@ const conn = connect({
 });
 
 export async function query(sql, args = []) {
-  const stmt = await conn.prepare(sql);
-  return stmt.all(args);
-}
-
-export async function execute(sql, args = []) {
-  const stmt = await conn.prepare(sql);
-  return stmt.run(args);
+  const res = await conn.execute({ sql, args });
+  return res.rows;
 }
 
 export async function get(sql, args = []) {
-  const rows = await query(sql, args);
-  return rows[0] || null;
+  const res = await conn.execute({ sql, args });
+  return res.rows[0] || null;
+}
+
+export async function execute(sql, args = []) {
+  return conn.execute({ sql, args });
 }
 
 export async function initSchema() {
@@ -68,12 +67,13 @@ export async function initSchema() {
     );
   `);
   for (const [k, v] of [
-    ['commission_pct', '25'], ['min_stake', '10'],
-    ['max_stake', '1000'], ['starting_balance', '1000'],
+    ['commission_pct', '25'],
+    ['min_stake', '10'],
+    ['max_stake', '1000'],
+    ['starting_balance', '1000'],
   ]) {
     await execute(
-      `INSERT INTO admin_settings (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO NOTHING`,
+      'INSERT INTO admin_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING',
       [k, v]
     );
   }
