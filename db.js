@@ -1,22 +1,33 @@
 import { createClient } from '@libsql/client/web';
 
-const conn = createClient({
-  url: process.env.TURSO_DATABASE_URL,
-  authToken: process.env.TURSO_AUTH_TOKEN,
-});
+let conn = null;
+
+function getConn() {
+  if (conn) return conn;
+  const url = process.env.TURSO_DATABASE_URL;
+  const authToken = process.env.TURSO_AUTH_TOKEN;
+  if (!url || !authToken) {
+    throw new Error(
+      `Turso env vars missing — url=${!!url} token=${!!authToken}. ` +
+      `Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in Vercel → Settings → Environment Variables.`
+    );
+  }
+  conn = createClient({ url, authToken });
+  return conn;
+}
 
 export async function query(sql, args = []) {
-  const res = await conn.execute({ sql, args });
+  const res = await getConn().execute({ sql, args });
   return res.rows;
 }
 
 export async function get(sql, args = []) {
-  const res = await conn.execute({ sql, args });
+  const res = await getConn().execute({ sql, args });
   return res.rows[0] || null;
 }
 
 export async function execute(sql, args = []) {
-  return conn.execute({ sql, args });
+  return getConn().execute({ sql, args });
 }
 
 export async function initSchema() {
